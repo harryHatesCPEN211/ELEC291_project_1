@@ -1,35 +1,61 @@
-; 76E003 ADC test program: Reads channel 7 on P1.1, pin 14 and transmits temperature over UART
+; 76E003 ADC test program: Reads channel 7 on P1.1 (pin 14) and transmits temperature over UART
 $NOLIST
 $MODN76E003
 $LIST
 
-CLK               EQU 16600000 ; Microcontroller system frequency in Hz
-BAUD              EQU 115200   ; Baud rate of UART in bps
-TIMER1_RELOAD     EQU (0x100-(CLK/(16*BAUD)))
-TIMER0_RELOAD_1MS EQU (0x10000-(CLK/1000))
+;-------------------------
+; Constant Definitions
+;-------------------------
+CLK               EQU 16600000      ; Microcontroller system frequency in Hz
+BAUD              EQU 115200        ; Baud rate of UART in bps
+TIMER1_RELOAD     EQU (0x100 - (CLK/(16*BAUD)))
+TIMER0_RELOAD_1MS EQU (0x10000 - (CLK/1000))
 
+; Output
+PWM_OUT    EQU P1.0 ; Logic 1=oven on
+
+BSEG
+s_flag: dbit 1 ; set to 1 every time a second has passed
+
+CSEG
 ORG 0x0000
-    ljmp main
+    ljmp main           ; Reset Vector: Jump to main
 
+; Interrupt Vectors
+ORG 0x0003            ; External interrupt 0 vector
+    reti
+ORG 0x000B            ; Timer/Counter 0 overflow interrupt vector
+    reti
+ORG 0x0013            ; External interrupt 1 vector
+    reti
+ORG 0x001B            ; Timer/Counter 1 overflow interrupt vector
+    reti
+ORG 0x0023            ; Serial port receive/transmit interrupt vector
+    reti
+ORG 0x002B            ; Timer/Counter 2 overflow interrupt vector
+    ljmp Timer2_ISR     ; (Make sure Timer2_ISR is defined somewhere)
+
+; I/O Pin definitions for the LCD
+LCD_RS EQU P1.3
+LCD_E  EQU P1.4
+LCD_D4 EQU P0.0
+LCD_D5 EQU P0.1
+LCD_D6 EQU P0.2
+LCD_D7 EQU P0.3
+; START: Define your start-button bit as needed.
+; START EQU P1.0
+
+; Constant strings (placed in code memory as read-only data)
 test_message:     db '*** ADC TEST ***', 0
 value_message:    db 'Temp(C)=        ', 0
-
-cseg
-LCD_RS equ P1.3
-LCD_E  equ P1.4
-LCD_D4 equ P0.0
-LCD_D5 equ P0.1
-LCD_D6 equ P0.2
-LCD_D7 equ P0.3
-;START equ....       ASSIGN START BUTTON HERE
 
 $NOLIST
 $include(LCD_4bit.inc)
 $LIST
 
-;-------------------------------------------------------
+;-------------------------
 ; Data Segment Definitions
-;-------------------------------------------------------
+;-------------------------
 DSEG at 30H
 x:   ds 4              ; Used for ADC-to-voltage conversion
 y:   ds 4              ; Used for calculations
@@ -38,7 +64,10 @@ adc_accumulator: ds 4  ; Holds accumulated ADC readings for averaging
 count: ds 1            ; Counter for averaging
 prev_avg: ds 3         ; Stores previous temperature value for UART consistency
 
-; ---FSM and Control Variables ---
+pwm_counter:  ds 1     ; Free running counter 0, 1, 2, ..., 100, 0
+seconds:      ds 1     ; Seconds counter (e.g. attached to Timer 2 ISR)
+
+; --- FSM and Control Variables ---
 FSM1_state: ds 1       ; Current state of the FSM
 pwm:         ds 1       ; PWM duty cycle (power level)
 sec:         ds 1       ; Seconds counter (timer)
@@ -49,15 +78,12 @@ Time_soak: ds 1
 Temp_refl: ds 1
 Time_refl: ds 1
 
-;-------------------------------------------------------
+;-------------------------
 ; Bit Segment Definitions
-;-------------------------------------------------------
+;-------------------------
 BSEG
 mf:    dbit 1
-; Define START as a bit variable. (If the Start button is connected
-; to a port bit—for example, P1.0—you could alternatively define:
-;    START EQU P1.0 )
-START: dbit 1
+START: dbit 1         ; Define START as a bit variable (or use an EQU if it maps to a port bit)
 
 $NOLIST
 $include(math32.inc)
@@ -125,6 +151,33 @@ Init_All:
     orl ADCCON1, #0x01
 
     ret
+    
+;---------------------------------;
+; ISR for timer 2                 ;
+;---------------------------------;
+Timer2_ISR:
+	clr TF2  ; Timer 2 doesn't clear TF2 automatically. Do it in the ISR.  It is bit addressable.
+	push psw
+	push acc
+	
+	inc pwm_counter
+	clr c
+	mov a, pwm
+	subb a, pwm_counter ; If pwm_counter <= pwm then c=1
+	cpl c
+	mov PWM_OUT, c
+	
+	mov a, pwm_counter
+	cjne a, #100, Timer2_ISR_done
+	mov pwm_counter, #0
+	inc seconds ; It is super easy to keep a seconds count here
+	setb s_flag
+
+Timer2_ISR_done:
+	pop acc
+	pop psw
+	reti
+
 
 ;---------------------------------;
 ; UART and Delay Routines         ;
@@ -175,46 +228,43 @@ send_newline:
     mov a, #'\r'
     lcall putchar
     ret
-    
-SendToSerialPort:
-	mov b, #100
-	div ab
-	orl a, #0x30; convert hundreds to ASCII
-	lcall putchar; Send to PuTTY/Python
-	mov a, b; Remainder is in register b
-	mov b, #10
-	div ab
-	orl a, #0x30; Covert tens to ASCII
-	lcall putchar; Send to PuTTY/Python
-	mov a, b
-	orl a, #0x30; Conver units to ASCII
-	lcall putchar; Send to PuTTY/python
-	ret
-	
-	
-; Eight bit number to display passed in 'a'
-; Send result to LCD
 
+SendToSerialPort:
+    mov b, #100
+    div ab
+    orl a, #0x30        ; convert hundreds to ASCII
+    lcall putchar       ; Send to PuTTY/Python
+    mov a, b           ; Remainder is in register b
+    mov b, #10
+    div ab
+    orl a, #0x30        ; Convert tens to ASCII
+    lcall putchar       ; Send to PuTTY/Python
+    mov a, b
+    orl a, #0x30        ; Convert units to ASCII
+    lcall putchar       ; Send to PuTTY/Python
+    ret
+
+; Eight-bit number display routine for the LCD
 sendToLCD:
-	mov b, #100
-	div ab
-	orl a, #0x30; Conver hundreds to ASCII
-	lcall ?WriteData; Send to LCD
-	mov a, b; remainder is in reg b
-	mov b, #10
-	div ab
-	orl a, #0x30; conver tens to ASCII
-	lcall ?WriteData; send to LCD
-	mov a, b
-	orl a, #0x30; convert units to ASCII
-	lcall ?WriteData; send LCD
-	ret
-		     
+    mov b, #100
+    div ab
+    orl a, #0x30        ; Convert hundreds to ASCII
+    lcall ?WriteData    ; Send to LCD
+    mov a, b           ; Remainder is in reg b
+    mov b, #10
+    div ab
+    orl a, #0x30        ; Convert tens to ASCII
+    lcall ?WriteData    ; Send to LCD
+    mov a, b
+    orl a, #0x30        ; Convert units to ASCII
+    lcall ?WriteData    ; Send to LCD
+    ret
+		      
 ;---------------------------------;
 ; Main Program                    ;
 ;---------------------------------;
 main:
-    mov sp, #0x7f
+    mov sp, #0x7F
     lcall Init_All
     lcall LCD_4BIT
 
@@ -229,7 +279,7 @@ Forever:
     mov adc_accumulator+1, #0
     mov adc_accumulator+2, #0
     mov adc_accumulator+3, #0
-    mov count, #250  ; Take 250 ADC samples for maximum smoothing
+    mov count, #250       ; Take 250 ADC samples for maximum smoothing
 
 adc_loop:
     clr ADCF
@@ -239,10 +289,10 @@ adc_loop:
     mov a, ADCRH
     swap a
     push acc
-    anl a, #0x0f
+    anl a, #0x0F
     mov R1, a
     pop acc
-    anl a, #0xf0
+    anl a, #0xF0
     orl a, ADCRL
     mov R0, A
  
@@ -411,5 +461,3 @@ FSM1_state5_done:
 ;--------------------------------------------------
 FSM2:
     ljmp Forever             ; Jump back to the main loop
-
-
