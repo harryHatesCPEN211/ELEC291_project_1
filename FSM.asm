@@ -19,7 +19,7 @@ s_flag: dbit 1 ; set to 1 every time a second has passed
 
 CSEG
 ORG 0x0000
-    ljmp main           ; Reset Vector: Jump to main
+    LJMP MainLoop           ; Reset Vector: Jump to main
 
 ; Interrupt Vectors
 ORG 0x0003            ; External interrupt 0 vector
@@ -33,7 +33,7 @@ ORG 0x001B            ; Timer/Counter 1 overflow interrupt vector
 ORG 0x0023            ; Serial port receive/transmit interrupt vector
     reti
 ORG 0x002B            ; Timer/Counter 2 overflow interrupt vector
-    ljmp Timer2_ISR     ; (Make sure Timer2_ISR is defined somewhere)
+    LJMP Timer2_ISR     ; (Make sure Timer2_ISR is defined somewhere)
 
 ; I/O Pin definitions for the LCD
 LCD_RS EQU P1.3
@@ -43,11 +43,17 @@ LCD_D5 EQU P0.1
 LCD_D6 EQU P0.2
 LCD_D7 EQU P0.3
 ; START: Define your start-button bit as needed.
-; START EQU P1.0
-
 ; Constant strings (placed in code memory as read-only data)
 test_message:     db '*** ADC TEST ***', 0
 value_message:    db 'Temp(C)=        ', 0
+
+state_idle:         db 'Idle      ', 0
+state_preheat:      db 'Preheat   ', 0
+state_soak   :      db 'Soak      ', 0
+state_reflow :      db 'Reflow    ', 0
+state_cooling:      db 'Cooling   ', 0
+state_final:        db 'FinalCool ', 0
+temp_label:         db 'Temp:   ', 0          
 
 $NOLIST
 $include(LCD_4bit.inc)
@@ -90,32 +96,6 @@ $include(math32.inc)
 $LIST
 
 ;---------------------------------;
-; Send a BCD number to PuTTY      ;
-;---------------------------------;
-Send_BCD mac
-    push ar0
-    mov r0, %0
-    lcall ?Send_BCD
-    pop ar0
-endmac
-
-?Send_BCD:
-    push acc
-    ; Write most significant digit
-    mov a, r0
-    swap a
-    anl a, #0fh
-    orl a, #30h
-    lcall putchar
-    ; Write least significant digit
-    mov a, r0
-    anl a, #0fh
-    orl a, #30h
-    lcall putchar
-    pop acc
-    ret
-
-;---------------------------------;
 ; Initialization Routines         ;
 ;---------------------------------;
 Init_All:
@@ -156,29 +136,28 @@ Init_All:
 ; ISR for timer 2                 ;
 ;---------------------------------;
 Timer2_ISR:
-	clr TF2  ; Timer 2 doesn't clear TF2 automatically. Do it in the ISR.  It is bit addressable.
-	push psw
-	push acc
+    clr TF2  ; Timer 2 doesn't clear TF2 automatically. Do it in the ISR.
+    push psw
+    push acc
 	
-	inc pwm_counter
-	clr c
-	mov a, pwm
-	subb a, pwm_counter ; If pwm_counter <= pwm then c=1
-	cpl c
-	mov PWM_OUT, c
+    inc pwm_counter
+    clr c
+    mov a, pwm
+    subb a, pwm_counter ; If pwm_counter <= pwm then c=1
+    cpl c
+    mov PWM_OUT, c
 	
-	mov a, pwm_counter
-	cjne a, #100, Timer2_ISR_done
-	mov pwm_counter, #0
-	inc seconds 
-	inc sec
-	setb s_flag
+    mov a, pwm_counter
+    cjne a, #100, Timer2_ISR_done
+    mov pwm_counter, #0
+    inc seconds 
+    inc sec
+    setb s_flag
 
 Timer2_ISR_done:
-	pop acc
-	pop psw
-	reti
-
+    pop acc
+    pop psw
+    reti
 
 ;---------------------------------;
 ; UART and Delay Routines         ;
@@ -264,25 +243,27 @@ sendToLCD:
 ;---------------------------------;
 ; Main Program                    ;
 ;---------------------------------;
-main:
-    mov sp, #0x7F
+;:
+   
+
+;------------------------------------------------------------------
+; Main Loop (renamed from "Forever" to "MainLoop" to allow long jumps)
+;------------------------------------------------------------------
+MainLoop:
+  
+   	mov sp, #0x7F
     lcall Init_All
     lcall LCD_4BIT
 
-    Set_Cursor(1, 1)
-    Send_Constant_String(#test_message)
-    Set_Cursor(2, 1)
-    Send_Constant_String(#value_message)
-
-Forever:
-    ; Reset accumulator and count
-    mov adc_accumulator+0, #0
-    mov adc_accumulator+1, #0
-    mov adc_accumulator+2, #0
-    mov adc_accumulator+3, #0
-    mov count, #250       ; Take 250 ADC samples for maximum smoothing
-
-adc_loop:
+     ;Display "Idle" and temperature:
+    Set_Cursor(1,1)
+    Send_Constant_String(#state_idle)
+    Set_Cursor(2,1)
+    Send_Constant_String(#temp_label)
+    Set_Cursor(2,10)
+    Display_BCD(temp)
+  
+  
     clr ADCF
     setb ADCS
     jnb ADCF, $
@@ -296,7 +277,7 @@ adc_loop:
     anl a, #0xF0
     orl a, ADCRL
     mov R0, A
- 
+	 
     mov x+0, R0
     mov x+1, R1
     mov x+2, #0
@@ -315,35 +296,35 @@ adc_loop:
 
     lcall hex2bcd
     lcall Display_formatted_BCD
-    
+	 
     mov a, bcd+2
     Send_BCD(a)
-    
+	 
     mov a, #'.'
     lcall putchar
-    
+	 
     mov a, bcd+1
     Send_BCD(a)
-    
+	 
     mov a, bcd+1
     Send_BCD(a)
-    
+	 
     mov a, #'\n'
     lcall putchar
     mov a, #'\r'
     lcall putchar
-
+	 
     mov R2, #250
     lcall waitms
     mov R2, #250
     lcall waitms
-
+	 
     cpl P1.7
-
+	 
     ; Store the calculated temperature into the 'temp' variable.
     ; (Here we assume that bcd+2 holds the integer part of the temperature.)
     mov temp, bcd+2
-
+	 
     ;---------------------------------------------;
     ; Finite State Machine (FSM) for Reflow Logic ;
     ;---------------------------------------------;
@@ -357,13 +338,19 @@ FSM1_state0:
     cjne a, #0, FSM1_state1  ; If FSM1_state != 0, jump to State 1
     mov pwm, #0              ; Set Power = 0% (Heater OFF)
     
-    jb  START, FSM1_state0_done  ; If Start button is pressed, proceed
-    jnb START, $                ; Wait for Start button release
+    ; Display "Idle" and temperature:
+    Set_Cursor(1,1)
+    Send_Constant_String(#state_idle)
+    Set_Cursor(2,1)
+    Send_Constant_String(#temp_label)
+    Display_BCD(temp)
     
-    mov FSM1_state, #1         ; Transition to State 1
+    ;jb  START, FSM1_state0_done  ; If Start button is pressed, proceed
+    ;jnb START, $                ; Wait for Start button release
+    mov FSM1_state, #0         ; Transition to State 1
 
-FSM1_state0_done:
-    ljmp FSM2                  ; Return to main loop
+;FSM1_state0_done:
+    LJMP FSM2                  ; Return to FSM exit point
 
 ;--------------------------------------------------
 ; State 1: Preheat (Warmup Phase)
@@ -373,16 +360,23 @@ FSM1_state1:
     mov pwm, #100            ; Set Power = 100% (Full Heating)
     mov sec, #0              ; Reset Timer
 
+	; Display "Preheat" and temperature:
+	Set_Cursor(1,1)
+    Send_Constant_String(#state_preheat)
+    Set_Cursor(2,1)
+    Send_Constant_String(#temp_label)
+    Display_BCD(temp)
+    
 FSM1_state1_loop:
     mov a, temp              ; Read current temperature
     clr c
     subb a, #150             ; Check if Temp > 150°C
     jnc FSM1_state1_done     ; If condition met, exit loop
-
-    mov FSM1_state, #2       ; Transition to State 2
+    LJMP FSM2                ; Return to main loop for ADC update
 
 FSM1_state1_done:
-    ljmp FSM2                ; Return to main loop
+    mov FSM1_state, #2       ; Transition to State 2
+    LJMP FSM2
 
 ;--------------------------------------------------
 ; State 2: Soak Phase
@@ -391,16 +385,22 @@ FSM1_state2:
     cjne a, #2, FSM1_state3  ; If not state 2, jump to State 3
     mov pwm, #20             ; Set Power = 20% (Low Heating)
     
+    ; Display "Soak" and temperature:
+	Set_Cursor(1,1)
+    Send_Constant_String(#state_soak)
+    Set_Cursor(2,1)
+    Send_Constant_String(#temp_label)
+    Display_BCD(temp)
+    
 FSM1_state2_loop:
     mov a, sec               ; Read elapsed time
     clr c
     subb a, #60              ; Check if Sec > 60 seconds
     jnc FSM1_state2_done     ; If condition met, exit loop
-
-    mov FSM1_state, #3       ; Transition to State 3
-
+    LJMP FSM2
 FSM1_state2_done:
-    ljmp FSM2                ; Return to main loop
+    mov FSM1_state, #3       ; Transition to State 3
+    LJMP FSM2
 
 ;--------------------------------------------------
 ; State 3: Reflow Phase
@@ -409,17 +409,23 @@ FSM1_state3:
     cjne a, #3, FSM1_state4  ; If not state 3, jump to State 4
     mov pwm, #100            ; Set Power = 100% (Full Heating)
     mov sec, #0              ; Reset Timer
-
+	
+	; Display "Reflow" and temperature:
+	Set_Cursor(1,1)
+    Send_Constant_String(#state_reflow)
+    Set_Cursor(2,1)
+    Send_Constant_String(#temp_label)
+    Display_BCD(temp)
+    
 FSM1_state3_loop:
     mov a, temp              ; Read current temperature
     clr c
     subb a, #220             ; Check if Temp > 220°C
     jnc FSM1_state3_done     ; If condition met, exit loop
-
-    mov FSM1_state, #4       ; Transition to State 4
-
+    LJMP FSM2
 FSM1_state3_done:
-    ljmp FSM2                ; Return to main loop
+    mov FSM1_state, #4       ; Transition to State 4
+    LJMP FSM2
 
 ;--------------------------------------------------
 ; State 4: Cooling Phase
@@ -428,37 +434,60 @@ FSM1_state4:
     cjne a, #4, FSM1_state5  ; If not state 4, jump to State 5
     mov pwm, #20             ; Set Power = 20% (Slow Cooling)
 
+	; Display "Cooling" and temperature:
+	Set_Cursor(1,1)
+    Send_Constant_String(#state_cooling)
+    Set_Cursor(2,1)
+    Send_Constant_String(#temp_label)
+    Display_BCD(temp)
+    
 FSM1_state4_loop:
     mov a, sec               ; Read elapsed time
     clr c
     subb a, #45              ; Check if Sec > 45 seconds
     jnc FSM1_state4_done     ; If condition met, exit loop
-
-    mov FSM1_state, #5       ; Transition to State 5
-
+    LJMP FSM2
 FSM1_state4_done:
-    ljmp FSM2                ; Return to main loop
+    mov FSM1_state, #5       ; Transition to State 5
+    LJMP FSM2
 
 ;--------------------------------------------------
 ; State 5: Final Cooling
 ;--------------------------------------------------
 FSM1_state5:
-    cjne a, #5, FSM1_state0  ; If not state 5, jump to State 0
-    mov pwm, #0              ; Set Power = 0% (Cooling OFF)
+    ;cjne a, #5, FSM1_state0  ; If not state 5, jump to State 0
+    ;mov pwm, #0              ; Set Power = 0% (Cooling OFF)
+    
+    mov r0, a
+    cjne r0, #5, label_not_equal
+    sjmp state5_continue
+    
+label_not_equal:
+	LJMP FSM1_state0
 
+state5_continue:
+	mov pwm, #0
+    
+	; Display "FinalCool" and temperature:
+	Set_Cursor(1,1)
+    Send_Constant_String(#state_final)
+    Set_Cursor(2,1)
+    Send_Constant_String(#temp_label)
+    Display_BCD(temp)
+    
 FSM1_state5_loop:
     mov a, temp              ; Read current temperature
     clr c
     subb a, #60              ; Check if Temp < 60°C
     jc FSM1_state5_done      ; If condition met, exit loop
-
-    mov FSM1_state, #0       ; Transition to State 0 (Idle)
-
+    LJMP FSM2
 FSM1_state5_done:
-    ljmp FSM2                ; Return to main loop
+    mov FSM1_state, #0       ; Transition to State 0 (Idle)
+    LJMP FSM2
 
 ;--------------------------------------------------
 ; FSM2: Exit Point for FSM (returns to main loop)
 ;--------------------------------------------------
 FSM2:
-    ljmp Forever             ; Jump back to the main loop
+    LJMP MainLoop           ; Jump back to the main loop
+
