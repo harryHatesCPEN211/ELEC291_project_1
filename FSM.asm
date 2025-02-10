@@ -248,8 +248,6 @@ Init_All:
     mov AINDIDS, #0x00
     orl AINDIDS, #0b10000000
     orl ADCCON1, #0x01
-
- ret 
  
     ; Setup Timer2 for PWM and timing:
     mov T2CON, #0x00           ; (Configure mode if required)
