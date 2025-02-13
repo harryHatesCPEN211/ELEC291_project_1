@@ -27,6 +27,8 @@ TIMER0_RELOAD     EQU ((65536-(CLK/TIMER0_RATE)))
 TIMER1_RELOAD     EQU (0x100-(CLK/(16*BAUD)))
 
 ; PITCH PIANO
+PITCH_REST        EQU 800
+TIMER0_REST       EQU ((65536-(CLK/PITCH_REST)))
 PITCH_C           EQU 2048
 TIMER0_C          EQU ((65536-(CLK/PITCH_C)))
 PITCH_CS          EQU 2220
@@ -59,6 +61,8 @@ PITCH_DD          EQU 4760
 TIMER0_DD         EQU ((65536-(CLK/PITCH_DD)))
 PITCH_DDS         EQU 5000
 TIMER0_DDS        EQU ((65536-(CLK/PITCH_DDS)))
+PITCH_EE          EQU 5280
+TIMER0_EE         EQU ((65536-(CLK/PITCH_EE)))
 ; END PITCH PIANO
 
 ; Output
@@ -75,6 +79,7 @@ state3_flag: dbit 1
 state4_flag: dbit 1
 state5_flag: dbit 1
 speaker_on_flag: dbit 1
+rest_flag: dbit 1
 
 
 ;push buttons:
@@ -163,20 +168,21 @@ $LIST
 
 time_message:   db 'TM', 0
 state0:       	db 'State0', 0
-state1:    		db 'State1', 0
-state2:         db 'State2     ', 0
-state3:         db 'State3', 0
-state4:         db 'State4', 0
-state5:         db 'State5', 0
+state1:    		db 'State1 ', 0
+state2:         db 'State2 ', 0
+state3:         db 'State3 ', 0
+state4:         db 'State4 ', 0
+state5:         db 'State5 ', 0
 state_error:    db '**ERROR**', 0
 mode_label:     db 'M:',0
 oven_temp:      db 'To:',0
 ambi_temp:      db 'Ta:', 0
+print_start:      	db 'S', 0
 
 
 Average_ADC:
     Load_x(0)
-    mov R5, #100
+    mov R5, #200
 	Sum_loop0:
     lcall Read_ADC
     mov y+3, #0
@@ -185,7 +191,7 @@ Average_ADC:
     mov y+0, R0
     lcall add32
     djnz R5, Sum_loop0
-    load_y(100)                  
+    load_y(200)                  
     lcall div32
     ret
 
@@ -391,6 +397,7 @@ speaker_tick:
 	djnz R2, speaker_tick
 	djnz R3, speaker_tick
 	
+	setb rest_flag
 	;clr beep_length_flag
 	ret
 	
@@ -400,7 +407,10 @@ speaker_1tick:
 	mov	TH0, pitch+1
 	mov	TL0, pitch+0
 	setb TR0
+
+	jnb rest_flag, speaker_bypass
 	cpl SOUND_OUT
+	speaker_bypass:
 	jnb	TF0, $ ; Wait for overflow
 	ret
 
@@ -641,25 +651,29 @@ displays:
 not_display_0:
 	ljmp display_1
 display_0:
-	Set_Cursor(1, 3)
-	Display_BCD(Oven_Display+2)
+	Set_Cursor(1, 4)
+	Display_One_BCD(Oven_Display+2)
  	Display_BCD(Oven_Display+1)
 	display_char(#'C')
 	Set_Cursor(1, 1)
 	Send_Constant_String(#oven_temp)
-	Set_Cursor(1, 13)
-	display_BCD(temp_reading+2)
+	Set_Cursor(1, 14)
+	display_BCD(Ambient_Display+2)
+	Set_Cursor(1, 16)
 	display_char(#'C')
 	Set_Cursor(1, 11)
 	Send_Constant_String(#ambi_temp)
-	Set_Cursor(2, 1)
-	display_BCD(soak_temp+1)
+	Set_Cursor(2, 2)
+	Display_One_BCD(soak_temp+1)
 	display_BCD(soak_temp+0)
-	display_BCD(soak_sec+1)
+	Set_Cursor(2, 6)
+	Display_One_BCD(soak_sec+1)
 	display_BCD(soak_sec+0)
-	display_BCD(reflow_temp+1)
+	Set_Cursor(2, 10)
+	Display_One_BCD(reflow_temp+1)
 	display_BCD(reflow_temp+0)
-	display_BCD(reflow_sec+1)
+	Set_Cursor(2, 14)
+	Display_One_BCD(reflow_sec+1)
 	display_BCD(reflow_sec+0)
 	
 	Set_Cursor(2, 1)
@@ -677,8 +691,8 @@ display_0_done:
 display_1:
 	Set_Cursor(1, 1)
 	lcall state_display
-	Set_Cursor(1, 13)
-	Display_BCD(Oven_Display+2)
+	Set_Cursor(1, 14)
+	Display_One_BCD(Oven_Display+2)
   	Display_BCD(Oven_Display+1)
 	Set_Cursor(1, 11)
 	Send_Constant_String(#oven_temp)
@@ -755,6 +769,10 @@ FSM_CheckState0:
     ; --- State 0: Idle ---
     cjne A, #0, FSM_CheckState1
         ; Idle: Heater off.
+        mov seconds, #0
+    	mov seconds+1, #0
+    	mov seconds_2, #0
+    	mov seconds_2+1, #0
         mov pwm, #100 ;No Heat
         ; Check start button (active high)
         lcall LCD_PB
@@ -776,25 +794,70 @@ FSM_CheckState1:
     jb state1_flag, FSM_State1
     mov seconds, #0
     mov seconds+1, #0
+    ;Send_Constant_String(#print_start)
     setb state1_flag
 FSM_State1:
     mov pwm, #0 ;Full Blast
-    ;mov seconds, #0         ; Reset state timer
-    mov A, Oven_Reading+1
+ljmp FSM_State1_Check_1     
+FSM_State1_Abort_Check1:
+    mov A, seconds+0
     clr C
-    subb A, soak_temp+0 
-    jnc FSM_State1_Check_2  
-    ret
-FSM_State1_Check_2:
-	mov A, Oven_Reading+2
+    subb A, #0x10
+    jnc FSM_State1_Abort_Check2
+    sjmp FSM_State1_Check_1
+
+FSM_State1_Abort_Check2:
+	mov A, seconds+1
     clr C
-    subb A, soak_temp+1 
-    jnc FSM_SetState2   
+    subb A, #0x00
+    jnc FSM_SetIdle_1 ;Abort
+    sjmp FSM_State1_Check_1  
+    
+    FSM_SetIdle_1:
+    mov FSM1_State, #0
+    mov seconds, #0
+    mov seconds+1, #0
+    mov seconds_2, #0
+    mov seconds_2+1, #0
+    setb state1_flag
+    setb state2_flag
+    setb state3_flag
+    setb state4_flag
+    setb state5_flag
     ret
-        
+
+; -------------------------------------------------
+; Compare 16-bit: 
+;    Oven_Reading (Hi @ +2, Lo @ +1)
+;     > soak_temp (Hi @ +1, Lo @ +0) ?
+; If greater, jump to FSM_SetState2; otherwise, ret.
+; -------------------------------------------------
+
+FSM_State1_Check_1:
+    ; 1) Compare the high bytes
+    mov   A, Oven_Display+2     ; A = high byte of Oven_Reading
+    clr   C
+    subb  A, soak_temp+1        ; A = (Oven_Reading.Hi) - (soak_temp.Hi)
+    jc    FSM_NotGreater        ; if carry=1 ? Oven_Reading.Hi < soak_temp.Hi ? return
+    jnz   FSM_SetState2         ; if A != 0 ? Oven_Reading.Hi > soak_temp.Hi ? FSM_SetState2
+    
+    ; 2) High bytes are equal; compare the low bytes
+    mov   A, Oven_Display+1     ; A = low byte of Oven_Reading
+    clr   C
+    subb  A, soak_temp+0        ; A = (Oven_Reading.Lo) - (soak_temp.Lo)
+    jc    FSM_NotGreater        ; if carry=1 ? Oven_Reading.Lo < soak_temp.Lo ? return
+    jz    FSM_NotGreater        ; if zero ? Oven_Reading.Lo == soak_temp.Lo ? not greater, return
+    
+    ; if we're here, Oven_Reading.Lo > soak_temp.Lo
+    ljmp  FSM_SetState2
+
+FSM_NotGreater:
+    ret
+
 FSM_SetState2:
-    mov FSM1_State, #2
+    mov   FSM1_State, #2
     ret
+
 
     ; --- State 2: Soak (wait until sec >= 60 seconds) ---
 FSM_CheckState2:
@@ -805,20 +868,36 @@ FSM_CheckState2:
     setb state2_flag
 FSM_State2:
     mov pwm, #80 ;Power at 20% at pwm = 80
-    mov A, seconds+0
-    clr C
-    subb A, soak_sec+0
-    jnc FSM_State2_Check2
+; Compare 16-bit: seconds (Hi @ +1, Lo @ +0)
+;             >  soak_sec (Hi @ +1, Lo @ +0) ?
+; If greater, jump to FSM_SetState3; otherwise, ret.
+
+FSM_State2_Check:
+    ; 1) Compare high bytes
+    mov   A, seconds+1      ; A = high byte of `seconds`
+    clr   C
+    subb  A, soak_sec+1     ; A = (seconds.high) - (soak_sec.high)
+    jc    NotGreater         ; if carry=1 => seconds.high < soak_sec.high => ret
+    jnz   IsGreater          ; if A != 0 => seconds.high > soak_sec.high => jump
+    
+    ; 2) High bytes are equal; compare low bytes
+    mov   A, seconds+0      ; A = low byte of `seconds`
+    clr   C
+    subb  A, soak_sec+0     ; A = (seconds.low) - (soak_sec.low)
+    jc    NotGreater         ; if carry=1 => seconds.low < soak_sec.low => ret
+    jz    NotGreater         ; if zero => they are equal => not strictly greater
+    
+IsGreater:
+    ljmp  FSM_SetState3
+
+NotGreater:
     ret
-FSM_State2_Check2:
-    mov A, seconds+1
-    clr C
-    subb A, soak_sec+1
-    jnc FSM_SetState3
-    ret
+
+
 FSM_SetState3:
-    mov FSM1_State, #3
+    mov   FSM1_State, #3
     ret
+
 
     ; --- State 3: Heat to Reflow (wait until temp >= 220C) ---
 FSM_CheckState3:
@@ -830,20 +909,41 @@ FSM_CheckState3:
     setb state3_flag
 FSM_State3:
     mov pwm, #0 ;Full Blast
-    mov A, Oven_Reading+1
-    clr C
-    subb A, reflow_temp+0 
-    jnc FSM_State3_Check_2  
+    ; -----------------------------------------------
+; Compare 16-bit: Oven_Reading (Hi @ +2, Lo @ +1)
+;             >  reflow_temp (Hi @ +1, Lo @ +0) ?
+; If greater, goto FSM_SetState4; otherwise, ret.
+; -----------------------------------------------
+
+FSM_State3_Check:
+    ; 1) Compare high bytes first
+    mov   A, Oven_Display+2   ; A = Oven_Reading.high
+    clr   C
+    subb  A, reflow_temp+1    ; A = (Oven_Reading.high) - (reflow_temp.high)
+    jc    NotGreater_3          ; if carry => Oven_Reading.high < reflow_temp.high => ret
+    jnz   IsGreater_3           ; if A != 0 => Oven_Reading.high > reflow_temp.high => jump
+    
+    ; 2) High bytes are equal; compare the low bytes
+    mov   A, Oven_Display+1   ; A = Oven_Reading.low
+    clr   C
+    subb  A, reflow_temp+0    ; A = (Oven_Reading.low) - (reflow_temp.low)
+    jc    NotGreater_3          ; if carry => Oven_Reading.low < reflow_temp.low => ret
+    jz    NotGreater_3          ; if zero => values are equal => not greater => ret
+    
+IsGreater_3:
+    ljmp  FSM_SetState4
+
+NotGreater_3:
     ret
-FSM_State3_Check_2:
-	mov A, Oven_Reading+2
-    clr C
-    subb A, reflow_temp+1 
-    jnc FSM_SetState4   
-    ret
+
+
+; -----------------------
+; Transition to state #4
+; -----------------------
 FSM_SetState4:
-    mov FSM1_State, #4
+    mov   FSM1_State, #4
     ret
+
 
     ; --- State 4: Reflow (wait until sec >= 45 seconds) ---
 FSM_CheckState4:
@@ -855,20 +955,40 @@ FSM_CheckState4:
     setb state4_flag
 FSM_State4:
     mov pwm, #80 ;PMW at 20% on
-    mov A, seconds+0
-    clr C
-    subb A, reflow_sec+0
-    jnc FSM_State4_Check2
+; Compare 16-bit:
+;    seconds (Hi @ +1, Lo @ +0)
+;        >  reflow_sec (Hi @ +1, Lo @ +0) ?
+; If greater, goto FSM_SetState5; otherwise, ret.
+
+FSM_State4_Check:
+    ; 1) Compare high bytes
+    mov   A, seconds+1       ; A = high byte of seconds
+    clr   C
+    subb  A, reflow_sec+1    ; A = (seconds.high - reflow_sec.high)
+    jc    NotGreater_4         ; if carry => seconds.high < reflow_sec.high => ret
+    jnz   IsGreater_4          ; if A != 0 => seconds.high > reflow_sec.high => jump
+    
+    ; 2) High bytes are equal; compare low bytes
+    mov   A, seconds+0       ; A = low byte of seconds
+    clr   C
+    subb  A, reflow_sec+0    ; A = (seconds.low - reflow_sec.low)
+    jc    NotGreater_4         ; if carry => seconds.low < reflow_sec.low => ret
+    jz    NotGreater_4         ; if zero => equal => not strictly greater => ret
+    
+IsGreater_4:
+    ljmp  FSM_SetState5
+
+NotGreater_4:
     ret
-FSM_State4_Check2:
-    mov A, seconds+1
-    clr C
-    subb A, reflow_sec+1
-    jnc FSM_SetState5
-    ret
+
+
+; -----------------------
+; Transition to state #5
+; -----------------------
 FSM_SetState5:
-    mov FSM1_State, #5
+    mov   FSM1_State, #5
     ret
+
 
     ; --- State 5: Cooling (wait until temp < 60C) ---
 FSM_CheckState5:
@@ -880,11 +1000,37 @@ FSM_CheckState5:
     setb state5_flag
 FSM_State5:
     mov pwm, #100 ;No heat
-    mov A, temp_reading
-    clr C
-    subb A, #60 ;;; Need to adjust for temp_reading value & magnitude
-    jc FSM_SetIdle     ; if temp < 60, transition to Idle
+    
+    mov   A, Oven_Display+2       ; A = high byte of seconds
+    clr   C
+    subb  A, #0x00    ; A = (seconds.high - reflow_sec.high)
+    jc    NotGreater_5         ; if carry => seconds.high < reflow_sec.high => ret
+    jnz   IsGreater_5          ; if A != 0 => seconds.high > reflow_sec.high => jump
+    
+    ; 2) High bytes are equal; compare low bytes
+    mov   A, Oven_Display+1       ; A = low byte of seconds
+    clr   C
+    subb  A, #0x60    ; A = (seconds.low - reflow_sec.low)
+    jc    NotGreater_5         ; if carry => seconds.low < reflow_sec.low => ret
+    jz    NotGreater_5         ; if zero => equal => not strictly greater => ret
+    
+IsGreater_5:
     ret
+
+NotGreater_5:
+    sjmp FSM_SetIdle
+    
+    
+    
+    
+    
+    
+    mov   A, Oven_Display+2
+    clr   C
+    subb  A, #0x60       ; Subtract 0x60 from Oven_Display
+    jc    FSM_SetIdle    ; Jump if Oven_Display < 0x60
+    ret
+
 FSM_SetIdle:
     mov FSM1_State, #0
     mov seconds, #0
@@ -902,198 +1048,329 @@ FSM_Update_End:
     ret
     
 Play_song:
-	mov R3, #high(1000)
-		mov R2, #low(1000)
-		mov R1, #high(TIMER0_C)
-		mov R0, #low(TIMER0_C)
+	
+	mov R3, #high(3867)
+		mov R2, #low(3867)
+		mov R1, #high(TIMER0_EE)
+		mov R0, #low(TIMER0_EE)
 		lcall speaker_tick
-	mov R3, #high(1289)
-		mov R2, #low(1289)
+	clr rest_flag
+	mov R3, #high(3867)
+		mov R2, #low(3867)
+		mov R1, #high(TIMER0_EE)
+		mov R0, #low(TIMER0_EE)
+		lcall speaker_tick
+	mov R3, #high(3867)
+		mov R2, #low(3867)
+		mov R1, #high(TIMER0_EE)
+		mov R0, #low(TIMER0_EE)
+		lcall speaker_tick
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(3867)
+		mov R2, #low(3867)
+		mov R1, #high(TIMER0_EE)
+		mov R0, #low(TIMER0_EE)
+		lcall speaker_tick
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(3867)
+		mov R2, #low(3867)
+		mov R1, #high(TIMER0_EE)
+		mov R0, #low(TIMER0_EE)
+		lcall speaker_tick
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(3867)
+		mov R2, #low(3867)
+		mov R1, #high(TIMER0_EE)
+		mov R0, #low(TIMER0_EE)
+		lcall speaker_tick
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(3867)
+		mov R2, #low(3867)
+		mov R1, #high(TIMER0_EE)
+		mov R0, #low(TIMER0_EE)
+		lcall speaker_tick
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(3867)
+		mov R2, #low(3867)
+		mov R1, #high(TIMER0_EE)
+		mov R0, #low(TIMER0_EE)
+		lcall speaker_tick
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(3867)
+		mov R2, #low(3867)
+		mov R1, #high(TIMER0_EE)
+		mov R0, #low(TIMER0_EE)
+		lcall speaker_tick
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(3867)
+		mov R2, #low(3867)
+		mov R1, #high(TIMER0_EE)
+		mov R0, #low(TIMER0_EE)
+		lcall speaker_tick
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(3867)
+		mov R2, #low(3867)
+		mov R1, #high(TIMER0_EE)
+		mov R0, #low(TIMER0_EE)
+		lcall speaker_tick
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(3867)
+		mov R2, #low(3867)
+		mov R1, #high(TIMER0_EE)
+		mov R0, #low(TIMER0_EE)
+		lcall speaker_tick
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(3867)
+		mov R2, #low(3867)
+		mov R1, #high(TIMER0_EE)
+		mov R0, #low(TIMER0_EE)
+		lcall speaker_tick
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(3867)
+		mov R2, #low(3867)
+		mov R1, #high(TIMER0_EE)
+		mov R0, #low(TIMER0_EE)
+		lcall speaker_tick
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(3867)
+		mov R2, #low(3867)
+		mov R1, #high(TIMER0_EE)
+		mov R0, #low(TIMER0_EE)
+		lcall speaker_tick
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(3867)
+		mov R2, #low(3867)
+		mov R1, #high(TIMER0_EE)
+		mov R0, #low(TIMER0_EE)
+		lcall speaker_tick
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(3867)
+		mov R2, #low(3867)
+		mov R1, #high(TIMER0_EE)
+		mov R0, #low(TIMER0_EE)
+		lcall speaker_tick
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(1934) ; Low E
+		mov R2, #low(1934)
 		mov R1, #high(TIMER0_E)
 		mov R0, #low(TIMER0_E)
 		lcall speaker_tick
-	mov R3, #high(1533)
-		mov R2, #low(1533)
-		mov R1, #high(TIMER0_G)
-		mov R0, #low(TIMER0_G)
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
 		lcall speaker_tick
-	mov R3, #high(6000) ;2000
-		mov R2, #low(6000)
-		mov R1, #high(TIMER0_CC)
-		mov R0, #low(TIMER0_CC)
+	mov R3, #high(3662) ; DDS
+		mov R2, #low(3662)
+		mov R1, #high(TIMER0_DDS)
+		mov R0, #low(TIMER0_DDS)
 		lcall speaker_tick
-	mov R3, #high(6973) ;4760
-		mov R2, #low(6973)
-		mov R1, #high(TIMER0_DD)
-		mov R0, #low(TIMER0_DD)
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
 		lcall speaker_tick
-	mov R3, #high(1958)
-		mov R2, #low(1958)
-		mov R1, #high(TIMER0_B)
-		mov R0, #low(TIMER0_B)
+	mov R3, #high(3662)
+		mov R2, #low(3662)
+		mov R1, #high(TIMER0_DDS)
+		mov R0, #low(TIMER0_DDS)
 		lcall speaker_tick
-	mov R3, #high(1709)
-		mov R2, #low(1709)
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(3662)
+		mov R2, #low(3662)
+		mov R1, #high(TIMER0_DDS)
+		mov R0, #low(TIMER0_DDS)
+		lcall speaker_tick
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(1831) ; DS
+		mov R2, #low(1831)
+		mov R1, #high(TIMER0_DS)
+		mov R0, #low(TIMER0_DS)
+		lcall speaker_tick
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(3208) ; CCS
+		mov R2, #low(3208)
+		mov R1, #high(TIMER0_CCS)
+		mov R0, #low(TIMER0_CCS)
+		lcall speaker_tick
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(3208)
+		mov R2, #low(3208)
+		mov R1, #high(TIMER0_CCS)
+		mov R0, #low(TIMER0_CCS)
+		lcall speaker_tick
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(3208)
+		mov R2, #low(3208)
+		mov R1, #high(TIMER0_CCS)
+		mov R0, #low(TIMER0_CCS)
+		lcall speaker_tick
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(1626) ; CS
+		mov R2, #low(1626)
+		mov R1, #high(TIMER0_CS)
+		mov R0, #low(TIMER0_CS)
+		lcall speaker_tick
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
+		lcall speaker_tick
+	mov R3, #high(2563)
+		mov R2, #low(2563)
 		mov R1, #high(TIMER0_A)
 		mov R0, #low(TIMER0_A)
 		lcall speaker_tick
-	mov R3, #high(1533)
-		mov R2, #low(1533)
-		mov R1, #high(TIMER0_G)
-		mov R0, #low(TIMER0_G)
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
 		lcall speaker_tick
-	mov R3, #high(5127)
-		mov R2, #low(5127)
+	mov R3, #high(2563)
+		mov R2, #low(2563)
 		mov R1, #high(TIMER0_A)
 		mov R0, #low(TIMER0_A)
 		lcall speaker_tick
-	mov R3, #high(4599)
-		mov R2, #low(4599)
-		mov R1, #high(TIMER0_G)
-		mov R0, #low(TIMER0_G)
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
 		lcall speaker_tick
-	mov R3, #high(1000)
-		mov R2, #low(1000)
-		mov R1, #high(TIMER0_C)
-		mov R0, #low(TIMER0_C)
+	mov R3, #high(2453)
+		mov R2, #low(2453)
+		mov R1, #high(TIMER0_GS)
+		mov R0, #low(TIMER0_GS)
 		lcall speaker_tick
-	mov R3, #high(1152)
-		mov R2, #low(1152)
-		mov R1, #high(TIMER0_D)
-		mov R0, #low(TIMER0_D)
+	clr rest_flag
+	mov R3, #high(600)
+		mov R2, #low(600)
+		mov R1, #high(TIMER0_REST)
+		mov R0, #low(TIMER0_REST)
 		lcall speaker_tick
-	mov R3, #high(1289)
-		mov R2, #low(1289)
-		mov R1, #high(TIMER0_E)
-		mov R0, #low(TIMER0_E)
-		lcall speaker_tick
-	mov R3, #high(4599)
-		mov R2, #low(4599)
-		mov R1, #high(TIMER0_G)
-		mov R0, #low(TIMER0_G)
-		lcall speaker_tick
-	mov R3, #high(5127)
-		mov R2, #low(5127)
-		mov R1, #high(TIMER0_A)
-		mov R0, #low(TIMER0_A)
-		lcall speaker_tick
-	mov R3, #high(1533)
-		mov R2, #low(1533)
-		mov R1, #high(TIMER0_G)
-		mov R0, #low(TIMER0_G)
-		lcall speaker_tick
-	mov R3, #high(1289)
-		mov R2, #low(1289)
-		mov R1, #high(TIMER0_E)
-		mov R0, #low(TIMER0_E)
-		lcall speaker_tick
-	mov R3, #high(1000)
-		mov R2, #low(1000)
-		mov R1, #high(TIMER0_C)
-		mov R0, #low(TIMER0_C)
-		lcall speaker_tick
-	mov R3, #high(6600) ;6912
-		mov R2, #low(6600)
-		mov R1, #high(TIMER0_D)
-		mov R0, #low(TIMER0_D)
-		lcall speaker_tick
-	mov R3, #high(1533)
-		mov R2, #low(1533)
-		mov R1, #high(TIMER0_G)
-		mov R0, #low(TIMER0_G)
-		lcall speaker_tick
-	mov R3, #high(1289)
-		mov R2, #low(1289)
-		mov R1, #high(TIMER0_E)
-		mov R0, #low(TIMER0_E)
-		lcall speaker_tick
-	mov R3, #high(1533)
-		mov R2, #low(1533)
-		mov R1, #high(TIMER0_G)
-		mov R0, #low(TIMER0_G)
-		lcall speaker_tick
-	mov R3, #high(6000) ;2000
-		mov R2, #low(6000)
-		mov R1, #high(TIMER0_CC)
-		mov R0, #low(TIMER0_CC)
-		lcall speaker_tick
-	mov R3, #high(5127)
-		mov R2, #low(5127)
-		mov R1, #high(TIMER0_A)
-		mov R0, #low(TIMER0_A)
-		lcall speaker_tick
-	mov R3, #high(1533)
-		mov R2, #low(1533)
-		mov R1, #high(TIMER0_G)
-		mov R0, #low(TIMER0_G)
-		lcall speaker_tick
-	mov R3, #high(1289)
-		mov R2, #low(1289)
-		mov R1, #high(TIMER0_E)
-		mov R0, #low(TIMER0_E)
-		lcall speaker_tick
-	mov R3, #high(1000)
-		mov R2, #low(1000)
-		mov R1, #high(TIMER0_C)
-		mov R0, #low(TIMER0_C)
-		lcall speaker_tick
-	mov R3, #high(3000)
-		mov R2, #low(3000)
-		mov R1, #high(TIMER0_C)
-		mov R0, #low(TIMER0_C)
-		lcall speaker_tick
-	mov R3, #high(3456)
-		mov R2, #low(3456)
-		mov R1, #high(TIMER0_D)
-		mov R0, #low(TIMER0_D)
-		lcall speaker_tick
-	mov R3, #high(1289)
-		mov R2, #low(1289)
-		mov R1, #high(TIMER0_E)
-		mov R0, #low(TIMER0_E)
-		lcall speaker_tick
-	mov R3, #high(1152)
-		mov R2, #low(1152)
-		mov R1, #high(TIMER0_D)
-		mov R0, #low(TIMER0_D)
-		lcall speaker_tick
-	mov R3, #high(1289)
-		mov R2, #low(1289)
-		mov R1, #high(TIMER0_E)
-		mov R0, #low(TIMER0_E)
-		lcall speaker_tick
-	mov R3, #high(4599)
-		mov R2, #low(4599)
-		mov R1, #high(TIMER0_G)
-		mov R0, #low(TIMER0_G)
-		lcall speaker_tick
-	mov R3, #high(5127)
-		mov R2, #low(5127)
-		mov R1, #high(TIMER0_A)
-		mov R0, #low(TIMER0_A)
-		lcall speaker_tick
-	mov R3, #high(1152)
-		mov R2, #low(1152)
-		mov R1, #high(TIMER0_D)
-		mov R0, #low(TIMER0_D)
-		lcall speaker_tick
-	mov R3, #high(1289)
-		mov R2, #low(1289)
-		mov R1, #high(TIMER0_E)
-		mov R0, #low(TIMER0_E)
-		lcall speaker_tick
-	mov R3, #high(1152)
-		mov R2, #low(1152)
-		mov R1, #high(TIMER0_D)
-		mov R0, #low(TIMER0_D)
-		lcall speaker_tick
-	mov R3, #high(6000)
-		mov R2, #low(6000)
-		mov R1, #high(TIMER0_C)
-		mov R0, #low(TIMER0_C)
-		lcall speaker_tick
-ret
+	
+	
+ret    
     
+   send_python:
+   	send_BCD(Oven_Display+2)
+  	send_BCD(Oven_Display+1)
+  	mov a, #'\n'
+  	lcall putchar
+  	mov a, #'\r'
+  	lcall putchar
+  	
+   
+   ret
     ;------------;
     ;    Main    ;
     ;------------;
@@ -1113,6 +1390,7 @@ Forever:
 	cjne a, #49, inc_temp_tick
 	mov temp_tick, #0
 	lcall sample_temp
+	lcall send_python
 	sjmp done_temp_sample
 inc_temp_tick:
 	inc temp_tick
