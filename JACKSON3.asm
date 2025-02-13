@@ -213,7 +213,7 @@ LCD_PB:
 	jb P1.5, LCD_PB_Done
 
 	; Debounce
-	mov R2, #50  ;;;;increased debounced time
+	mov R2, #100  ;;;;increased debounced time
 	lcall waitms
 	jb P1.5, LCD_PB_Done
 
@@ -307,7 +307,6 @@ Exit_Config_Mode_1:
     
 Toggle_Selected_Param:
 
-
     setb Config_Mode
 
     mov A, Selected_Param
@@ -333,7 +332,6 @@ Increment_Selected_Param:
     
 
 Check_Increase_1:
-    mov A, Selected_Param
     cjne A, #1, Check_Increase_2
     mov A, soak_sec+0
     inc A
@@ -343,7 +341,7 @@ Check_Increase_1:
     
 
 Check_Increase_2:
-    mov A, Selected_Param
+
     cjne A, #2, Check_Increase_3
     mov A, reflow_temp+0
     inc A
@@ -353,7 +351,6 @@ Check_Increase_2:
     
 
 Check_Increase_3:
-    mov A, Selected_Param
     cjne A, #3, ending
     mov A, reflow_sec+0
     inc A
@@ -372,7 +369,6 @@ Decrement_Selected_Param:
 	ret
 
 Decrease_Soak_Temp:
-    mov A, Selected_Param
     cjne A, #0, Check_Decrease_1
     mov A, soak_temp+0
     add A, #0x99
@@ -381,7 +377,6 @@ Decrease_Soak_Temp:
 	ret
 
 Check_Decrease_1:
-	mov A, Selected_Param
     cjne A, #1, Check_Decrease_2
     mov A, soak_sec+0
     add A, #0x99
@@ -390,7 +385,7 @@ Check_Decrease_1:
 	ret
 
 Check_Decrease_2:
-	mov A, Selected_Param
+
     cjne A, #2, Check_Decrease_3
     mov A, reflow_temp+0
     add A, #0x99
@@ -399,7 +394,7 @@ Check_Decrease_2:
 	ret
 
 Check_Decrease_3:
-    mov A, Selected_Param
+
     cjne A, #3, ending
     mov A, reflow_sec+0
     add A, #0x99
