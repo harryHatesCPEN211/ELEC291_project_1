@@ -80,6 +80,8 @@ state4_flag: dbit 1
 state5_flag: dbit 1
 speaker_on_flag: dbit 1
 rest_flag: dbit 1
+Config_Mode: dbit 1
+
 
 
 ;push buttons:
@@ -118,6 +120,7 @@ Oven_Reading: ds 4
 Oven_Display: ds 4
 Ambient_Display: ds 4
 
+Selected_Param: ds 1
 CSEG
 ; Reset vector
 org 0x0000
@@ -196,6 +199,7 @@ Average_ADC:
     ret
 
 ;-------------------------------------PUSHBUTTONS-----------------------------------------------:
+;-------------------------------------PUSHBUTTONS-----------------------------------------------:
 LCD_PB:
 	; Set variables to 1: 'no push button pressed'
 	setb PB0
@@ -215,7 +219,7 @@ LCD_PB:
 	jb P1.5, LCD_PB_Done
 
 	; Debounce
-	mov R2, #50
+	mov R2, #100  ;;;;increased debounced time
 	lcall waitms
 	jb P1.5, LCD_PB_Done
 
@@ -227,33 +231,191 @@ LCD_PB:
 	setb P1.3
 	
 	; Check the push buttons one by one
-	clr P1.3
-	mov c, P1.5
-	mov PB4, c
-	setb P1.3
+	;clr P1.3
+	;mov c, P1.5
+	;mov PB4, c
+	;setb P1.3
 
+	;clr P0.0
+	;mov c, P1.5
+	;mov PB3, c
+	;setb P0.0
+	
+	;clr P0.1
+	;mov c, P1.5
+	;mov PB2, c
+	;setb P0.1
+	
+	;clr P0.2
+	;mov c, P1.5
+	;mov PB1, c
+	;setb P0.2
+	
+	;clr P0.3
+	;mov c, P1.5
+	;mov PB0, c
+	;setb P0.3
+	
+	;check PB4;
+	clr P1.3
+	jb P1.5, PB4_Not
+	clr PB4	
+PB4_Not:
+	setb P1.3
+	
+	
+	;check PB3;
 	clr P0.0
-	mov c, P1.5
-	mov PB3, c
+	jb P1.5,PB3_Not
+	clr PB3	
+PB3_Not:
 	setb P0.0
 	
+	;check PB2;
 	clr P0.1
-	mov c, P1.5
-	mov PB2, c
+	jb P1.5,PB2_Not
+	clr PB2	
+PB2_Not:
 	setb P0.1
 	
+	;check PB1;
 	clr P0.2
-	mov c, P1.5
-	mov PB1, c
-	setb P0.2
+	jb P1.5,PB1_Not
+	clr PB1	
+PB1_Not:
+	setb P0.2	
 	
+	;check PB0;
 	clr P0.3
-	mov c, P1.5
-	mov PB0, c
+	jb P1.5,PB0_Not
+	clr PB0	
+PB0_Not:
 	setb P0.3
+	
+	
+	
 
-LCD_PB_Done:		
+LCD_PB_Done:	
 	ret
+
+
+
+Modify_Parameter:
+    jnb PB4, Toggle_Selected_Param
+    jnb PB3, Increment_Selected_Param
+    jnb PB2, Decrement_Selected_Param
+    jnb PB1, Exit_Config_Mode_1
+    ret
+
+Exit_Config_Mode_1:
+    clr Config_Mode
+    ret
+    
+Toggle_Selected_Param:
+
+    setb Config_Mode
+
+    mov A, Selected_Param
+	add A, #1
+    cjne A, #4, Store_Selected_Param
+    mov A, #0
+
+Store_Selected_Param:
+    mov Selected_Param, A
+    ret
+
+
+Increment_Selected_Param:
+    jnb Config_Mode, Exit_Config_Mode
+    
+    mov A, Selected_Param
+    cjne A, #0, Check_Increase_1
+    mov A, soak_temp+0
+    inc A
+    da A
+    mov soak_temp+0, A
+	ret
+    
+
+Check_Increase_1:
+    cjne A, #1, Check_Increase_2
+    mov A, soak_sec+0
+    inc A
+    da A
+    mov soak_sec+0, A
+	ret
+    
+
+Check_Increase_2:
+
+    cjne A, #2, Check_Increase_3
+    mov A, reflow_temp+0
+    inc A
+    da A
+    mov reflow_temp+0, A
+	ret
+    
+
+Check_Increase_3:
+    cjne A, #3, ending
+    mov A, reflow_sec+0
+    inc A
+    da A
+    mov reflow_sec+0, A
+	ret
+    
+
+
+Decrement_Selected_Param:
+	jnb Config_Mode, Exit_Config_Mode
+    mov A, Selected_Param
+    cjne A, #0, Check_Decrease_1 
+    mov R7, soak_temp+0
+    cjne R7, #100, Decrease_Soak_Temp
+	ret
+
+Decrease_Soak_Temp:
+    cjne A, #0, Check_Decrease_1
+    mov A, soak_temp+0
+    add A, #0x99
+    da A
+    mov soak_temp+0, A
+	ret
+
+Check_Decrease_1:
+    cjne A, #1, Check_Decrease_2
+    mov A, soak_sec+0
+    add A, #0x99
+    da A
+    mov soak_sec+0, A
+	ret
+
+Check_Decrease_2:
+
+    cjne A, #2, Check_Decrease_3
+    mov A, reflow_temp+0
+    add A, #0x99
+    da A
+    mov reflow_temp+0, A
+	ret
+
+Check_Decrease_3:
+
+    cjne A, #3, ending
+    mov A, reflow_sec+0
+    add A, #0x99
+    da A
+    mov reflow_sec+0, A
+	ret
+
+
+ending:
+ret
+
+Exit_Config_Mode:
+    clr Config_Mode
+    ret
+
     
 ;--------------------------------------------------------------------------------------;
 Init_All:
@@ -290,7 +452,7 @@ Init_All:
 	mov reflow_temp+0, #0x20
 	mov reflow_sec+1, #0x00
 	mov reflow_sec+0, #0x30
-	
+	mov Selected_Param, #0
 ; Timer 1
 	
 	orl	CKCON, #0x10 ; CLK is the input for timer 1
@@ -472,7 +634,6 @@ Done_Updating_Time_2:
 	setb s_flag
 
 Timer2_ISR_done:
-
 
 	pop acc
 	pop psw
@@ -765,6 +926,7 @@ state_display_done:
 FSM_Update:
 
 FSM_CheckState0:
+	;ljmp FSM_State1
     mov A, FSM1_state
     ; --- State 0: Idle ---
     cjne A, #0, FSM_CheckState1
@@ -773,7 +935,7 @@ FSM_CheckState0:
     	mov seconds+1, #0
     	mov seconds_2, #0
     	mov seconds_2+1, #0
-        mov pwm, #100 ;No Heat
+        mov pwm, #100 ;No Heat;;;;;;;;;;;PWM current possible driver
         ; Check start button (active high)
         lcall LCD_PB
         jnb PB0, FSM_Idle_Pressed ;;;;;;;;;;;;;;;;;;;;;;
@@ -1395,6 +1557,8 @@ Forever:
 inc_temp_tick:
 	inc temp_tick
 done_temp_sample:
+	lcall LCD_PB
+	lcall Modify_Parameter
 	lcall FSM_Update
 	lcall displays
 	ljmp Forever	
