@@ -316,12 +316,11 @@ Toggle_Selected_Param:
 
 Store_Selected_Param:
     mov Selected_Param, A
-    lcall displays
     ret
 
 
 Increment_Selected_Param:
-    jnb Config_Mode, Update_LCD
+    jnb Config_Mode, Exit_Config_Mode
     
     mov A, Selected_Param
     cjne A, #0, Check_Increase_1
@@ -329,7 +328,6 @@ Increment_Selected_Param:
     inc A
     da A
     mov soak_temp+0, A
-    sjmp Update_LCD
 	ret
     
 
@@ -340,7 +338,6 @@ Check_Increase_1:
     inc A
     da A
     mov soak_sec+0, A
-    sjmp Update_LCD
 	ret
     
 
@@ -351,7 +348,6 @@ Check_Increase_2:
     inc A
     da A
     mov reflow_temp+0, A
-    sjmp Update_LCD
 	ret
     
 
@@ -360,29 +356,23 @@ Check_Increase_3:
     inc A
     da A
     mov reflow_sec+0, A
-    sjmp Update_LCD
 	ret
     
-Update_LCD:
-	lcall displays
-	ret
 
 
 Decrement_Selected_Param:
-	jnb Config_Mode, Update_LCD
+	jnb Config_Mode, Exit_Config_Mode
     mov A, Selected_Param
     cjne A, #0, Check_Decrease_1 
     mov R7, soak_temp+0
     cjne R7, #100, Decrease_Soak_Temp
-    sjmp Update_LCD
-	
-
+	ret
 Decrease_Soak_Temp:
     mov A, soak_temp+0
     add A, #0x99
     da A
     mov soak_temp+0, A
-    sjmp Update_LCD
+	ret
 
 Check_Decrease_1:
 	mov A, Selected_Param
@@ -391,7 +381,8 @@ Check_Decrease_1:
     add A, #0x99
     da A
     mov soak_sec+0, A
-    sjmp Update_LCD
+
+	ret
 
 Check_Decrease_2:
 	mov A, Selected_Param
@@ -400,14 +391,14 @@ Check_Decrease_2:
     add A, #0x99
     da A
     mov reflow_temp+0, A
-    sjmp Update_LCD
+	ret
 
 Check_Decrease_3:
     mov A, reflow_sec+0
     add A, #0x99
     da A
     mov reflow_sec+0, A
-    sjmp Update_LCD
+	ret
 
 
 Exit_Config_Mode:
