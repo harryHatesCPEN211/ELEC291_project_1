@@ -252,7 +252,7 @@ LCD_PB:
 	
 	;check PB4;
 	clr P1.3
-	jb P1.5,PB4_Not
+	jb P1.5, PB4_Not
 	clr PB4	
 PB4_Not:
 	setb P1.3
@@ -306,9 +306,10 @@ Exit_Config_Mode_1:
     ret
     
 Toggle_Selected_Param:
+
+
     setb Config_Mode
 
-    
     mov A, Selected_Param
 	add A, #1
     cjne A, #4, Store_Selected_Param
@@ -352,6 +353,8 @@ Check_Increase_2:
     
 
 Check_Increase_3:
+    mov A, Selected_Param
+    cjne A, #3, ending
     mov A, reflow_sec+0
     inc A
     da A
@@ -367,7 +370,10 @@ Decrement_Selected_Param:
     mov R7, soak_temp+0
     cjne R7, #100, Decrease_Soak_Temp
 	ret
+
 Decrease_Soak_Temp:
+    mov A, Selected_Param
+    cjne A, #0, Check_Decrease_1
     mov A, soak_temp+0
     add A, #0x99
     da A
@@ -381,7 +387,6 @@ Check_Decrease_1:
     add A, #0x99
     da A
     mov soak_sec+0, A
-
 	ret
 
 Check_Decrease_2:
@@ -394,6 +399,8 @@ Check_Decrease_2:
 	ret
 
 Check_Decrease_3:
+    mov A, Selected_Param
+    cjne A, #3, ending
     mov A, reflow_sec+0
     add A, #0x99
     da A
@@ -401,6 +408,8 @@ Check_Decrease_3:
 	ret
 
 
+ending:
+ret
 Exit_Config_Mode:
     clr Config_Mode
     ret
@@ -441,6 +450,7 @@ Init_All:
 	mov reflow_temp+0, #0x20
 	mov reflow_sec+1, #0x00
 	mov reflow_sec+0, #0x30
+	mov Selected_Param,#0
 	
 ; Timer 1
 	
@@ -924,7 +934,7 @@ FSM_CheckState0:
     	mov seconds_2+1, #0
         mov pwm, #100 ;No Heat
         ; Check start button (active high)
-        lcall LCD_PB
+        ;lcall LCD_PB
         jnb PB0, FSM_Idle_Pressed ;;;;;;;;;;;;;;;;;;;;;;
         ret
     FSM_Idle_Pressed:
