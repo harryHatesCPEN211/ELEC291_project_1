@@ -80,6 +80,10 @@ state4_flag: dbit 1
 state5_flag: dbit 1
 speaker_on_flag: dbit 1
 rest_flag: dbit 1
+Config_Mode: dbit 1
+
+abortFlag: dbit 1
+
 
 
 ;push buttons:
@@ -118,6 +122,7 @@ Oven_Reading: ds 4
 Oven_Display: ds 4
 Ambient_Display: ds 4
 
+Selected_Param: ds 1
 CSEG
 ; Reset vector
 org 0x0000
@@ -196,6 +201,7 @@ Average_ADC:
     ret
 
 ;-------------------------------------PUSHBUTTONS-----------------------------------------------:
+;-------------------------------------PUSHBUTTONS-----------------------------------------------:
 LCD_PB:
 	; Set variables to 1: 'no push button pressed'
 	setb PB0
@@ -215,7 +221,7 @@ LCD_PB:
 	jb P1.5, LCD_PB_Done
 
 	; Debounce
-	mov R2, #50
+	mov R2, #150  ;;;;increased debounced time
 	lcall waitms
 	jb P1.5, LCD_PB_Done
 
@@ -227,33 +233,191 @@ LCD_PB:
 	setb P1.3
 	
 	; Check the push buttons one by one
-	clr P1.3
-	mov c, P1.5
-	mov PB4, c
-	setb P1.3
+	;clr P1.3
+	;mov c, P1.5
+	;mov PB4, c
+	;setb P1.3
 
+	;clr P0.0
+	;mov c, P1.5
+	;mov PB3, c
+	;setb P0.0
+	
+	;clr P0.1
+	;mov c, P1.5
+	;mov PB2, c
+	;setb P0.1
+	
+	;clr P0.2
+	;mov c, P1.5
+	;mov PB1, c
+	;setb P0.2
+	
+	;clr P0.3
+	;mov c, P1.5
+	;mov PB0, c
+	;setb P0.3
+	
+	;check PB4;
+	clr P1.3
+	jb P1.5, PB4_Not
+	clr PB4	
+PB4_Not:
+	setb P1.3
+	
+	
+	;check PB3;
 	clr P0.0
-	mov c, P1.5
-	mov PB3, c
+	jb P1.5,PB3_Not
+	clr PB3	
+PB3_Not:
 	setb P0.0
 	
+	;check PB2;
 	clr P0.1
-	mov c, P1.5
-	mov PB2, c
+	jb P1.5,PB2_Not
+	clr PB2	
+PB2_Not:
 	setb P0.1
 	
+	;check PB1;
 	clr P0.2
-	mov c, P1.5
-	mov PB1, c
-	setb P0.2
-	
-	clr P0.3
-	mov c, P1.5
-	mov PB0, c
-	setb P0.3
+	jb P1.5,PB1_Not
+	clr PB1
+PB1_Not:
+	setb P0.2			
 
-LCD_PB_Done:		
+	;check PB0;
+	clr P0.3
+	jb P1.5,PB0_Not
+	clr PB0	
+PB0_Not:
+	setb P0.3
+	
+	
+	
+
+LCD_PB_Done:	
 	ret
+
+
+
+Modify_Parameter:
+    jnb PB4, Toggle_Selected_Param
+    jnb PB3, Increment_Selected_Param
+    jnb PB2, Decrement_Selected_Param
+    jnb PB1, Exit_Config_Mode_1
+    ret
+
+Exit_Config_Mode_1:
+    setb abortFlag
+    ret
+    
+Toggle_Selected_Param:
+
+    setb Config_Mode
+
+    mov A, Selected_Param
+	add A, #1
+    cjne A, #4, Store_Selected_Param
+    mov A, #0
+
+Store_Selected_Param:
+    mov Selected_Param, A
+    ret
+
+
+Increment_Selected_Param:
+    jnb Config_Mode, Exit_Config_Mode
+    
+    mov A, Selected_Param
+    cjne A, #0, Check_Increase_1
+    mov A, soak_temp+0
+    inc A
+    da A
+    mov soak_temp+0, A
+	ret
+    
+
+Check_Increase_1:
+    cjne A, #1, Check_Increase_2
+    mov A, soak_sec+0
+    inc A
+    da A
+    mov soak_sec+0, A
+	ret
+    
+
+Check_Increase_2:
+
+    cjne A, #2, Check_Increase_3
+    mov A, reflow_temp+0
+    inc A
+    da A
+    mov reflow_temp+0, A
+	ret
+    
+
+Check_Increase_3:
+    cjne A, #3, ending
+    mov A, reflow_sec+0
+    inc A
+    da A
+    mov reflow_sec+0, A
+	ret
+    
+
+
+Decrement_Selected_Param:
+	jnb Config_Mode, Exit_Config_Mode
+    mov A, Selected_Param
+    cjne A, #0, Check_Decrease_1 
+    mov R7, soak_temp+0
+    cjne R7, #100, Decrease_Soak_Temp
+	ret
+
+Decrease_Soak_Temp:
+    cjne A, #0, Check_Decrease_1
+    mov A, soak_temp+0
+    add A, #0x99
+    da A
+    mov soak_temp+0, A
+	ret
+
+Check_Decrease_1:
+    cjne A, #1, Check_Decrease_2
+    mov A, soak_sec+0
+    add A, #0x99
+    da A
+    mov soak_sec+0, A
+	ret
+
+Check_Decrease_2:
+
+    cjne A, #2, Check_Decrease_3
+    mov A, reflow_temp+0
+    add A, #0x99
+    da A
+    mov reflow_temp+0, A
+	ret
+
+Check_Decrease_3:
+
+    cjne A, #3, ending
+    mov A, reflow_sec+0
+    add A, #0x99
+    da A
+    mov reflow_sec+0, A
+	ret
+
+
+ending:
+ret
+
+Exit_Config_Mode:
+    clr Config_Mode
+    ret
+
     
 ;--------------------------------------------------------------------------------------;
 Init_All:
@@ -290,7 +454,7 @@ Init_All:
 	mov reflow_temp+0, #0x20
 	mov reflow_sec+1, #0x00
 	mov reflow_sec+0, #0x30
-	
+	mov Selected_Param, #0
 ; Timer 1
 	
 	orl	CKCON, #0x10 ; CLK is the input for timer 1
@@ -473,7 +637,6 @@ Done_Updating_Time_2:
 
 Timer2_ISR_done:
 
-
 	pop acc
 	pop psw
 	reti
@@ -565,7 +728,7 @@ sample_temp:
     mov x+1, R1
     mov x+2, #0
     mov x+3, #0
-	load_y(410) ;;;;;;;;
+	load_y(388) ;;;;;;;;
 	lcall mul32
 	load_y(100)
 	lcall mul32
@@ -765,6 +928,7 @@ state_display_done:
 FSM_Update:
 
 FSM_CheckState0:
+	;ljmp FSM_State1
     mov A, FSM1_state
     ; --- State 0: Idle ---
     cjne A, #0, FSM_CheckState1
@@ -773,7 +937,7 @@ FSM_CheckState0:
     	mov seconds+1, #0
     	mov seconds_2, #0
     	mov seconds_2+1, #0
-        mov pwm, #100 ;No Heat
+        mov pwm, #100 ;No Heat;;;;;;;;;;;PWM current possible driver
         ; Check start button (active high)
         lcall LCD_PB
         jnb PB0, FSM_Idle_Pressed ;;;;;;;;;;;;;;;;;;;;;;
@@ -794,15 +958,18 @@ FSM_CheckState1:
     jb state1_flag, FSM_State1
     mov seconds, #0
     mov seconds+1, #0
+    lcall call_speaker
     ;Send_Constant_String(#print_start)
     setb state1_flag
 FSM_State1:
     mov pwm, #0 ;Full Blast
-ljmp FSM_State1_Check_1     
+    ;mov a, abortFlag
+    jb abortFlag, FSM_SetIdle_1
+;ljmp FSM_State1_Check_1     
 FSM_State1_Abort_Check1:
     mov A, seconds+0
     clr C
-    subb A, #0x10
+    subb A, #0x60
     jnc FSM_State1_Abort_Check2
     sjmp FSM_State1_Check_1
 
@@ -813,7 +980,8 @@ FSM_State1_Abort_Check2:
     jnc FSM_SetIdle_1 ;Abort
     sjmp FSM_State1_Check_1  
     
-    FSM_SetIdle_1:
+FSM_SetIdle_1:
+    clr abortFlag
     mov FSM1_State, #0
     mov seconds, #0
     mov seconds+1, #0
@@ -866,11 +1034,13 @@ FSM_CheckState2:
     mov seconds, #0
     mov seconds+1, #0
     setb state2_flag
+    lcall call_speaker
 FSM_State2:
     mov pwm, #80 ;Power at 20% at pwm = 80
 ; Compare 16-bit: seconds (Hi @ +1, Lo @ +0)
 ;             >  soak_sec (Hi @ +1, Lo @ +0) ?
 ; If greater, jump to FSM_SetState3; otherwise, ret.
+	jb abortFlag, FSM_SetIdle_2
 
 FSM_State2_Check:
     ; 1) Compare high bytes
@@ -897,6 +1067,20 @@ NotGreater:
 FSM_SetState3:
     mov   FSM1_State, #3
     ret
+    
+FSM_SetIdle_2:
+    clr abortFlag
+    mov FSM1_State, #0
+    mov seconds, #0
+    mov seconds+1, #0
+    mov seconds_2, #0
+    mov seconds_2+1, #0
+    clr state1_flag
+    clr state2_flag
+    clr state3_flag
+    clr state4_flag
+    clr state5_flag
+    ret
 
 
     ; --- State 3: Heat to Reflow (wait until temp >= 220C) ---
@@ -907,8 +1091,10 @@ FSM_CheckState3:
     mov seconds, #0
     mov seconds+1, #0
     setb state3_flag
+    lcall call_speaker
 FSM_State3:
     mov pwm, #0 ;Full Blast
+    jb abortFlag, FSM_SetIdle_3
     ; -----------------------------------------------
 ; Compare 16-bit: Oven_Reading (Hi @ +2, Lo @ +1)
 ;             >  reflow_temp (Hi @ +1, Lo @ +0) ?
@@ -936,6 +1122,19 @@ IsGreater_3:
 NotGreater_3:
     ret
 
+FSM_SetIdle_3:
+    clr abortFlag
+    mov FSM1_State, #0
+    mov seconds, #0
+    mov seconds+1, #0
+    mov seconds_2, #0
+    mov seconds_2+1, #0
+    setb state1_flag
+    setb state2_flag
+    setb state3_flag
+    setb state4_flag
+    setb state5_flag
+    ret
 
 ; -----------------------
 ; Transition to state #4
@@ -953,8 +1152,10 @@ FSM_CheckState4:
     mov seconds, #0
     mov seconds+1, #0
     setb state4_flag
+    lcall call_speaker
 FSM_State4:
     mov pwm, #80 ;PMW at 20% on
+    jb abortFlag, FSM_SetIdle_4
 ; Compare 16-bit:
 ;    seconds (Hi @ +1, Lo @ +0)
 ;        >  reflow_sec (Hi @ +1, Lo @ +0) ?
@@ -981,6 +1182,20 @@ IsGreater_4:
 NotGreater_4:
     ret
 
+FSM_SetIdle_4:
+    clr abortFlag
+    mov FSM1_State, #0
+    mov seconds, #0
+    mov seconds+1, #0
+    mov seconds_2, #0
+    mov seconds_2+1, #0
+    setb state1_flag
+    setb state2_flag
+    setb state3_flag
+    setb state4_flag
+    setb state5_flag
+    ret
+
 
 ; -----------------------
 ; Transition to state #5
@@ -998,8 +1213,10 @@ FSM_CheckState5:
     mov seconds, #0
     mov seconds+1, #0
     setb state5_flag
+    lcall call_speaker
 FSM_State5:
     mov pwm, #100 ;No heat
+    jb abortFlag, FSM_SetIdle
     
     mov   A, Oven_Display+2       ; A = high byte of seconds
     clr   C
@@ -1395,6 +1612,8 @@ Forever:
 inc_temp_tick:
 	inc temp_tick
 done_temp_sample:
+	lcall LCD_PB
+	lcall Modify_Parameter
 	lcall FSM_Update
 	lcall displays
 	ljmp Forever	
