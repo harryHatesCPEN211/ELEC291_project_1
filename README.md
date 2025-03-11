@@ -1,4 +1,4 @@
-![Reflow Soldering Process](https://github.com/harryHatesCPEN211/ELEC291_project_1/blob/eb1a9bda3876f7ce5a50482ae54d57ed98568fc2/Picture%201.png)
+
 ![Reflow Soldering Process](https://github.com/harryHatesCPEN211/ELEC291_project_1/blob/4ad491b80fbd7e23051242375f895bce1a59a06a/IMG_0236.png)
 ## About
 
