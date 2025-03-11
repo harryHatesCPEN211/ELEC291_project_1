@@ -1,4 +1,5 @@
 ![Reflow Soldering Process](https://github.com/harryHatesCPEN211/ELEC291_project_1/blob/eb1a9bda3876f7ce5a50482ae54d57ed98568fc2/Picture%201.png)
+![Reflow Soldering Process](https://github.com/harryHatesCPEN211/ELEC291_project_1/blob/d2d7e9c8d45a6dc2869474c8854cb24424cc95a8/IMG_0236.HEIC)
 ## About
 
 Reflow soldering is used to assemble surface-mounted-technology (SMT) devices onto printed circuit boards (PCBs). The process utilizes solder paste (a mixture of solder flux and pellets with adhesive properties) to attach micro-components onto the PCBs. Once components are moderately secured on the pads, the board is then placed into an oven, which is gradually heated based on a predetermined soldering profile. This profile includes a customizable reflow time, reflow temperature, and soak time. During the heating process, the flux is activated, and the solder paste melts, soldering the components onto the PCB.
